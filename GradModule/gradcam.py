@@ -23,7 +23,9 @@ class GradCAM:
 
         :return: Last layer name
         """
-        pass
+        for layer in reversed(self.model.layers):
+            if len(layer.output_shape) == 4:
+                return layer.name
 
     def compute_heatmap(self, image, eps=1e-8):
         """
