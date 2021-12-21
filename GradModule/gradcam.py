@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import cv2
 
+
 class GradCAM:
     def __init__(self, model, classIdx, layerName=None):
         """
@@ -40,12 +41,46 @@ class GradCAM:
             outputs=[self.model.get_layer(self.layerName).output,
                      self.model.output])
 
-        pass
+        with tf.GradientTape() as tape:
+            """
+            Cast the image tensor to a float, pass the image through
+            the model and grab the loss associated with specific class
+            index.
+            """
+            inputs = tf.cast(image, tf.float32)
+            (convOutputs, predictions) = gradModel(inputs)
+            loss = predictions[:, self.classIdx]
+
+            # Compute the gradients using automatic differentiation
+            grads = tape.gradient(loss, convOutputs)
+
+            castConvOutputs = tf.cast(convOutputs > 0, "float32")
+            castGrads = tf.cast(grads > 0, "float32")
+            guidedGrads = castConvOutputs * castGrads * grads
+
+            # Compute the average of gradient values, use it as weights
+            # Compute the ponderation of the filters with respect to the weights
+            weights = tf.reduce_mean(guidedGrads, axis=(0, 1))
+            cam = tf.reduce_sum(tf.multiply(weights, convOutputs), axis=-1)
+
+            # Grab the spatial dimensions of the input and resizes
+            # the output class activation map to match dimensions
+            (w, h) = (image.shape[2], image.shape[1])
+            heatmap = cv2.resize(cam.numpy(), (w, h))
+
+            # Normalize the heatmap
+            num = heatmap - np.min(heatmap)
+            denom = (heatmap.max() - heatmap.min()) + eps
+            heatmap = num / denom
+            heatmap = (heatmap * 255).astype("uint8")
+
+            return heatmap
 
     def overlay_heatmap(self, heatmap, image, alpha=0.5, colormap=cv2.COLORMAP_RAINBOW):
         """
         Apply the supplied color map to the heatmap and then overlay the heatmap
         with input image.
         """
-        pass
-
+        heatmap = cv2.applyColorMap(heatmap, colormap)
+        output = cv2.addWeighted(image, alpha, heatmap, 1-alpha, 0)
+        return (heatmap, output)
